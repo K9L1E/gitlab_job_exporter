@@ -22,10 +22,5 @@ setup(
         'python-dateutil',
         'urllib3'
     ],
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT",
-        "Operating System :: OS Independent",
-    ],
     zip_safe=False
 )
