@@ -6,10 +6,10 @@ def readme():
         return f.read()
 
 setup(
-    name="gitlab_job_exporter",
+    name="gitlab-job-exporter",
     version="0.0.1",
     author="Sven Hertzberg",
-    author_email="sven.hertzberg@cloudcentric.de",
+    author_email="sven.hertzberg@codecentric.cloud",
     description="Package to scrape running_time, duration_time, status, etc. of Gitlab jobs using prometheus time series format",
     license='MIT',
     long_description=readme(),
@@ -18,7 +18,7 @@ setup(
     scripts=['bin/gitlab_job_exporter'],
     packages=find_packages(),
     install_requires=[
-        'prometheus_client',
+        'prometheus-client',
         'python-dateutil',
         'urllib3'
     ],
