@@ -1,16 +1,19 @@
 import json
 import time
 from dateutil.parser import parse
-from urllib.request import urlopen,Request
+try:
+    from urllib.request  import urlopen, Request
+except ImportError:
+    from urllib2 import urlopen, Request
 from prometheus_client import start_http_server
 from prometheus_client.core import GaugeMetricFamily, REGISTRY
 
 # metrics:
 #
-# gitlab_job_time['GitRepo','Branch','Pipeline-Id','Job']: in seconds
-# gitlab_job_running_time['GitRepo','Branch','Pipeline-Id','Job']: in seconds
-# gitlab_job_duration_time['GitRepo','Branch','Pipeline-Id','Job']: in seconds
-# gitlab_job_state['GitRepo','Branch','Pipeline-Id','Job']: success=0, pending=1, running=2, failed=3, canceled=4,skipped=5,undefined=99
+# gitlab_job_time['GitRepo','Branch','PipelineId','Job']: in seconds
+# gitlab_job_running_time['GitRepo','Branch','PipelineId','Job']: in seconds
+# gitlab_job_duration_time['GitRepo','Branch','PipelineId','Job']: in seconds
+# gitlab_job_state['GitRepo','Branch','PipelineId','Job']: success=0, pending=1, running=2, failed=3, canceled=4,skipped=5,undefined=99
 
 # Download data via http get
 def http_get_data(url):
@@ -42,20 +45,20 @@ class GitlabJobCollector(object):
         # Define metrics
         metric_pending_time = GaugeMetricFamily(
             'gitlab_job_pending_time',
-            'gitlab job time between creation and starting the pipeline',
-            labels = ['GitRepo','Branch','Pipeline-Id','Job','Stage'])
+            'Gitlab job time between creation and starting the pipeline.',
+            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
         metric_running_time = GaugeMetricFamily(
             'gitlab_job_running_time',
-            'gitlab job time between starting and finishing the pipeline',
-            labels = ['GitRepo','Branch','Pipeline-Id','Job','Stage'])
+            'Gitlab job time between starting and finishing the pipeline.',
+            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
         metric_duration_time = GaugeMetricFamily(
             'gitlab_job_duration_time',
-            'gitlab job time between creation and finishing the pipeline',
-            labels = ['GitRepo','Branch','Pipeline-Id','Job','Stage'])
+            'Gitlab job time between creation and finishing the pipeline.',
+            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
         metric_state =  GaugeMetricFamily(
             'gitlab_job_state',
-            'gitlab job state (success=0,pending=1,running=2,failed=3,canceled=4,skipped=5,undefined=99)',
-            labels = ['GitRepo','Branch','Pipeline-Id','Job','Stage'])
+            'Gitlab job state (success=0,pending=1,running=2,failed=3,canceled=4,skipped=5,undefined=99).',
+            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
   
   
         # Get somme information of project 1881
@@ -153,7 +156,7 @@ class GitlabJobCollector(object):
             yield metric_duration_time
             yield metric_state
   
-            # Only yiel valid running_time
+            # Only yield valid running_time
             if running_time != init_timestamp:
                 metric_running_time.add_metric([project_url,branch_monitoring,pipeline_latest_id,job_id,stage],running_time.seconds)
                 yield metric_running_time

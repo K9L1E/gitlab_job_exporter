@@ -7,7 +7,7 @@ def readme():
 
 setup(
     name="gitlab-job-exporter",
-    version="0.0.1",
+    version="0.0.5",
     author="Sven Hertzberg",
     author_email="sven.hertzberg@codecentric.cloud",
     description="Package to scrape running_time, duration_time, status, etc. of Gitlab jobs using prometheus time series format",
@@ -20,7 +20,8 @@ setup(
     install_requires=[
         'prometheus-client',
         'python-dateutil',
-        'urllib3'
+        'urllib3',
+        'requests'
     ],
     zip_safe=False
 )
