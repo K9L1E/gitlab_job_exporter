@@ -93,7 +93,7 @@ class GitlabJobCollector():
         # Get information of all jobs of that last pipeline
         url_pipeline_jobs = git_project_pipeline + "/" + pipeline_latest_id + "/jobs"
         jobs = json.load(http_get_data(url_pipeline_jobs, git_token))
-  for job in jobs:
+        for job in jobs:
             job_id = str(job.get("id"))
             stage = job.get("stage")
             creation_time = parse(job.get("created_at"))
