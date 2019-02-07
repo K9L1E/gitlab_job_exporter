@@ -16,21 +16,26 @@ from prometheus_client.core import GaugeMetricFamily, REGISTRY
 # gitlab_job_state['GitRepo','Branch','PipelineId','Job']: success=0, pending=1, running=2, failed=3, canceled=4,skipped=5,undefined=99
 
 # Download data via http get
-def http_get_data(url):
+def http_get_data(url,token):
     request = Request(url)
-    request.add_header('PRIVATE-TOKEN', 'nrzfLnPyYx4VMuEGLMRx')
+    request.add_header('PRIVATE-TOKEN', token)
     return urlopen(request)
 
 
-class GitlabJobCollector(object):
+class GitlabJobCollector():
+
+    def __init__(self, git_project_url, git_project_id, git_token, git_branch):
+        self.git_project_url = git_project_url
+        self.git_project_id = git_project_id
+        self.git_token = git_token
+        self.git_branch = git_branch
+
 
     def collect(self):
   
-        # project: openstack-gitlab-runner, id 1881
-        project_id = str(1881)
-        url_project =   "https://gitlab.codecentric.de/api/v4/projects/" + project_id
-        url_pipelines = url_project + "/pipelines"
-        branch_monitoring = "gitlab-ci-monitoring-pipeline"
+        git_project = self.git_project_url + str(self.git_project_id)
+        git_project_pipeline = git_project + "/pipelines"
+        git_token = self.git_token
         pipelines_monitoring_lst = []
         init_timestamp = parse("1970/01/01 00:00:00.000+01:00")
   
@@ -62,18 +67,18 @@ class GitlabJobCollector(object):
   
   
         # Get somme information of project 1881
-        project = json.load(http_get_data(url_project))
+        project = json.load(http_get_data(git_project, git_token))
         project_name = project.get("name")
         project_url = project.get("http_url_to_repo")
   
         # Get all pipelines of project 1881
-        pipelines = json.load(http_get_data(url_pipelines))
+        pipelines = json.load(http_get_data(git_project_pipeline, git_token))
   
         # Make sure we use the last pipeline
         for pl in pipelines:
             pipeline_id = pl.get("id")
             branch = pl.get("ref")
-            if branch == branch_monitoring:
+            if branch == branch:
                 pipelines_monitoring_lst.append(pipeline_id)
   
         # Sort pipeline list descending
@@ -81,15 +86,14 @@ class GitlabJobCollector(object):
         pipeline_latest_id = str(pipelines_monitoring_lst[0])
   
         # Get pipeline specific information, e.g. updated_at
-        url_pipeline_latest = url_pipelines + "/" + pipeline_latest_id
-        pipeline_latest_details = json.load(http_get_data(url_pipeline_latest))
+        url_pipeline_latest = git_project_pipeline + "/" + pipeline_latest_id
+        pipeline_latest_details = json.load(http_get_data(url_pipeline_latest, git_token))
         pl_updated_time = parse(pipeline_latest_details.get("updated_at"))
   
         # Get information of all jobs of that last pipeline
-        url_pipeline_jobs = url_pipelines + "/" + pipeline_latest_id + "/jobs"
-        jobs = json.load(http_get_data(url_pipeline_jobs))
-  
-        for job in jobs:
+        url_pipeline_jobs = git_project_pipeline + "/" + pipeline_latest_id + "/jobs"
+        jobs = json.load(http_get_data(url_pipeline_jobs, git_token))
+  for job in jobs:
             job_id = str(job.get("id"))
             stage = job.get("stage")
             creation_time = parse(job.get("created_at"))
@@ -147,9 +151,9 @@ class GitlabJobCollector(object):
                 state_int = gitlab_job_status_undefined
   
             # Build metrics
-            metric_pending_time.add_metric([project_url,branch_monitoring,pipeline_latest_id,job_id,stage],pending_time.seconds)
-            metric_duration_time.add_metric([project_url,branch_monitoring,pipeline_latest_id,job_id,stage],duration_time.seconds)
-            metric_state.add_metric([project_url,branch_monitoring,pipeline_latest_id,job_id,stage],state_int)
+            metric_pending_time.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],pending_time.seconds)
+            metric_duration_time.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],duration_time.seconds)
+            metric_state.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],state_int)
   
             # yield metric
             yield metric_pending_time
@@ -158,12 +162,16 @@ class GitlabJobCollector(object):
   
             # Only yield valid running_time
             if running_time != init_timestamp:
-                metric_running_time.add_metric([project_url,branch_monitoring,pipeline_latest_id,job_id,stage],running_time.seconds)
+                metric_running_time.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],running_time.seconds)
                 yield metric_running_time
 
 
-def start_server(port, interval):
-    REGISTRY.register(GitlabJobCollector())
+def start_server(port, interval, git_project_url, git_project_id, git_token, git_branch):
+
+    gitlab_job = GitlabJobCollector(git_project_url, git_project_id, git_token, git_branch)
+
+    REGISTRY.register(gitlab_job)
+
     start_http_server(port)
     while True: time.sleep(interval)
 
