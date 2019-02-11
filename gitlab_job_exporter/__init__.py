@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import json
 import time
 from dateutil.parser import parse
@@ -5,174 +6,121 @@ try:
     from urllib.request  import urlopen, Request
 except ImportError:
     from urllib2 import urlopen, Request
-from prometheus_client import start_http_server
-from prometheus_client.core import GaugeMetricFamily, REGISTRY
+from prometheus_client import Summary
+from prometheus_client.core import GaugeMetricFamily
+
+COLLECTION_TIME = Summary('gitlab_job_collector_collect_seconds', 'Time spent to collect metrics from Gitlab')  
 
 # metrics:
 #
-# gitlab_job_time['GitRepo','Branch','PipelineId','Job']: in seconds
-# gitlab_job_running_time['GitRepo','Branch','PipelineId','Job']: in seconds
-# gitlab_job_duration_time['GitRepo','Branch','PipelineId','Job']: in seconds
-# gitlab_job_state['GitRepo','Branch','PipelineId','Job']: success=0, pending=1, running=2, failed=3, canceled=4,skipped=5,undefined=99
+# gitlab_job_id_last_{status}['GitRepo','Branch']: number
+# gitlab_job_created_timestamp_last_{status}['GitRepo','Branch']: unix timestamp
+# gitlab_job_duration_starting_seconds_last_{status}['GitRepo','Branch']: seconds
+# gitlab_job_duration_running_seconds_last_{status}['GitRepo','Branch']: seconds
+# gitlab_job_duration_seconds_last_{status}['GitRepo','Branch']: seconds 
 
 # Download data via http get
-def http_get_data(url,token):
+def _http_get_data(url,token):
     request = Request(url)
     request.add_header('PRIVATE-TOKEN', token)
-    return urlopen(request)
+    data = json.load(urlopen(request))
+    return data
+# 
+def _get_repo_url(git_url,project_id,token):
+    git_project_url = git_url + str(project_id)
+    project = _http_get_data(git_project_url, token)
+    return project.get("http_url_to_repo")
 
 
 class GitlabJobCollector():
 
-    def __init__(self, git_project_url, git_project_id, git_token, git_branch):
-        self.git_project_url = git_project_url
-        self.git_project_id = git_project_id
-        self.git_token = git_token
-        self.git_branch = git_branch
+    # Currently only success and failed seems to be interesting
+    #job_status = [ "success", "pending", "running", "failed", "canceled", "skipped", "undefined" ]
+    job_status = [ "success", "failed" ]
+
+    def __init__(self, git_url, git_project_id, git_token, git_branch):
+        self._git_url = git_url
+        self._git_project_id = git_project_id
+        self._git_token = git_token
+        self._git_branch = git_branch
 
 
     def collect(self):
-  
-        git_project = self.git_project_url + str(self.git_project_id)
-        git_project_pipeline = git_project + "/pipelines"
-        git_token = self.git_token
-        pipelines_monitoring_lst = []
-        init_timestamp = parse("1970/01/01 00:00:00.000+01:00")
-  
-        gitlab_job_status_success   =  0
-        gitlab_job_status_pending   =  1
-        gitlab_job_status_running   =  2
-        gitlab_job_status_failed    =  3
-        gitlab_job_status_canceled  =  4
-        gitlab_job_status_skipped   =  5
-        gitlab_job_status_undefined = 99
-  
-        # Define metrics
-        metric_pending_time = GaugeMetricFamily(
-            'gitlab_job_pending_time',
-            'Gitlab job time between creation and starting the pipeline.',
-            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
-        metric_running_time = GaugeMetricFamily(
-            'gitlab_job_running_time',
-            'Gitlab job time between starting and finishing the pipeline.',
-            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
-        metric_duration_time = GaugeMetricFamily(
-            'gitlab_job_duration_time',
-            'Gitlab job time between creation and finishing the pipeline.',
-            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
-        metric_state =  GaugeMetricFamily(
-            'gitlab_job_state',
-            'Gitlab job state (success=0,pending=1,running=2,failed=3,canceled=4,skipped=5,undefined=99).',
-            labels = ['GitRepo','Branch','PipelineId','Job','Stage'])
-  
-  
-        # Get somme information of project 1881
-        project = json.load(http_get_data(git_project, git_token))
-        project_name = project.get("name")
-        project_url = project.get("http_url_to_repo")
-  
-        # Get all pipelines of project 1881
-        pipelines = json.load(http_get_data(git_project_pipeline, git_token))
-  
-        # Make sure we use the last pipeline
-        for pl in pipelines:
-            pipeline_id = pl.get("id")
-            branch = pl.get("ref")
-            if branch == branch:
-                pipelines_monitoring_lst.append(pipeline_id)
-  
-        # Sort pipeline list descending
-        pipelines_monitoring_lst.sort(reverse = True)
-        pipeline_latest_id = str(pipelines_monitoring_lst[0])
-  
-        # Get pipeline specific information, e.g. updated_at
-        url_pipeline_latest = git_project_pipeline + "/" + pipeline_latest_id
-        pipeline_latest_details = json.load(http_get_data(url_pipeline_latest, git_token))
-        pl_updated_time = parse(pipeline_latest_details.get("updated_at"))
-  
-        # Get information of all jobs of that last pipeline
-        url_pipeline_jobs = git_project_pipeline + "/" + pipeline_latest_id + "/jobs"
-        jobs = json.load(http_get_data(url_pipeline_jobs, git_token))
-        for job in jobs:
-            job_id = str(job.get("id"))
-            stage = job.get("stage")
-            creation_time = parse(job.get("created_at"))
-  
-            try:
-                start_time = parse(job.get("started_at"))
-            except:
-                start_time = init_timestamp
-  
-            try:
-                finish_time = parse(job.get("finished_at"))
-            except:
-                finish_time = init_timestamp
-  
-            state = job.get("status")
-  
-            # Compute Metrics pending_time, start_time, duration_time
-            # pending_time
-            if start_time == init_timestamp: 
-                pending_time = pl_updated_time - creation_time
-            else:
-                pending_time = start_time - creation_time
-  
-            # running_time
-            if finish_time == init_timestamp and start_time == init_timestamp:
-                running_time = init_timestamp
-            elif finish_time == init_timestamp and start_time != init_timestamp:
-                if start_time > pl_updated_time:
-                    running_time = start_time - pl_updated_time
-                else:
-                    running_time = pl_updated_time - start_time
-            else:
-                running_time = finish_time - start_time
-  
-            # duration_time
-            if finish_time == init_timestamp:
-                duration_time = pl_updated_time - creation_time
-            else:
-                duration_time = finish_time - creation_time
-  
-            # Map status to int
-            if state == "success":
-                state_int = gitlab_job_status_success
-            elif state == "pending":
-                state_int = gitlab_job_status_pending
-            elif state == "running":
-                state_int = gitlab_job_status_running
-            elif state == "failed":
-                state_int = gitlab_job_status_failed
-            elif state == "canceled":
-                state_int = gitlab_job_status_canceled
-            elif state == "skipped":
-                state_int = gitlab_job_status_skipped
-            else:
-                state_int = gitlab_job_status_undefined
-  
-            # Build metrics
-            metric_pending_time.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],pending_time.seconds)
-            metric_duration_time.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],duration_time.seconds)
-            metric_state.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],state_int)
-  
-            # yield metric
-            yield metric_pending_time
-            yield metric_duration_time
-            yield metric_state
-  
-            # Only yield valid running_time
-            if running_time != init_timestamp:
-                metric_running_time.add_metric([project_url,branch,pipeline_latest_id,job_id,stage],running_time.seconds)
-                yield metric_running_time
 
+        start = time.time()  
+        
+        # Get url of git project
+        self.git_repo_url = _get_repo_url(self._git_url, self._git_project_id, self._git_token)
 
-def start_server(port, interval, git_project_url, git_project_id, git_token, git_branch):
+        # Setup empty prometheus metrics
+        self._setup_empty_prometheus_metrics()
 
-    gitlab_job = GitlabJobCollector(git_project_url, git_project_id, git_token, git_branch)
+        # Get all needed metrics
+        for status in self.job_status:
+           self._get_all_metrics(status)
 
-    REGISTRY.register(gitlab_job)
+        for status in self.job_status:
+            for metric in self._prometheus_metrics[status].values():
+                yield metric
 
-    start_http_server(port)
-    while True: time.sleep(interval)
+        # Scraping duration
+        duration = time.time() - start
+        COLLECTION_TIME.observe(duration)
 
+    def _get_all_metrics(self,status):
+
+        job_data = {}
+
+        # Get last job of desired status. 
+        # Git sorts jobs descending so we just have to select the first job of the first page...
+        url = self._git_url + self._git_project_id + '/jobs?scope={0}&per_page=1&page=1'.format(status)
+
+        job_data[status] = _http_get_data(url,self._git_token)
+
+        # Get values needed to define metrics
+        for job in job_data[status]:
+            job_id          = job.get("id")
+            job_created_at  = parse(job.get("created_at"))
+            job_started_at  = parse(job.get("started_at"))
+            job_finished_at = parse(job.get("finished_at"))
+            job_duration_starting = job_started_at - job_created_at
+            job_duration_running  = job_finished_at - job_started_at
+            job_duration_total    = job.get("duration")
+
+        # Add data to metrics
+        self._prometheus_metrics[status]['job_id'].add_metric([self.git_repo_url,self._git_branch], job_id)
+        self._prometheus_metrics[status]['job_created_at'].add_metric([self.git_repo_url,self._git_branch], job_created_at.timestamp())
+        self._prometheus_metrics[status]['job_duration_starting'].add_metric([self.git_repo_url,self._git_branch], job_duration_starting.total_seconds())
+        self._prometheus_metrics[status]['job_duration_running'].add_metric([self.git_repo_url,self._git_branch], job_duration_running.total_seconds())
+        self._prometheus_metrics[status]['job_duration_total'].add_metric([self.git_repo_url,self._git_branch], job_duration_total)
+
+    def _setup_empty_prometheus_metrics(self):
+
+        # Metrics to export
+        self._prometheus_metrics = {}
+
+        for status in self.job_status:
+            self._prometheus_metrics[status] = {
+
+              'job_id': 
+                  GaugeMetricFamily('gitlab_job_id_last_{0}'.format(status),
+                                    'Gitlab job ID of the last {0} job'.format(status),
+                                    labels = ['GitRepo','Branch']),
+              'job_created_at': 
+                  GaugeMetricFamily('gitlab_job_created_timestamp_last_{0}'.format(status),
+                                    'Gitlab job creation timestamp of the last {0} job'.format(status),
+                                    labels = ['GitRepo','Branch']),
+              'job_duration_starting': 
+                  GaugeMetricFamily('gitlab_job_duration_starting_seconds_last_{0}'.format(status),
+                                    'Gitlab job time between creation and running of the last {0} job'.format(status),
+                                    labels = ['GitRepo','Branch']),
+              'job_duration_running': 
+                  GaugeMetricFamily('gitlab_job_duration_running_seconds_last_{0}'.format(status),
+                                    'Gitlab job time between creation and finishing of the last {0} job'.format(status),
+                                    labels = ['GitRepo','Branch']),
+              'job_duration_total': 
+                  GaugeMetricFamily('gitlab_job_duration_seconds_last_{0}'.format(status),
+                                    'Gitlab job time between creation and finishing of the last {0} job'.format(status),
+                                    labels = ['GitRepo','Branch'])
+            }
 
